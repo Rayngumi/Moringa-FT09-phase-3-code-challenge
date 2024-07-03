@@ -1,20 +1,18 @@
-from models.__init__ import CURSOR, CONN
-from models.author import Author
+from database.setup import get_db_connection
+CONN = get_db_connection()
+CURSOR = CONN.cursor()
 
 class Magazine:
-    def __init__(self, cursor, id=None,  name=None, category=None):
-        self.conn = CONN
-        self.cursor = CURSOR
-        self._id = None
-        self._name = None
-        self._category = None
+    all = {}
+
+    def __init__(self, id, name, category):
+        self.id = id
         self.name = name
         self.category = category
+        type(self).all[self.id] = self
 
-    def create_magazines_table(self):
-        self.cursor.execute('''CREATE TABLE IF NOT EXISTS magazines
-                         (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, category TEXT)''')
-        self.conn.commit()
+    def __repr__(self):
+        return f'<Magazine {self.name}, Category: {self.category}>'
 
     @property
     def id(self):
@@ -22,9 +20,10 @@ class Magazine:
 
     @id.setter
     def id(self, value):
-        if not isinstance(value, int):
-            raise TypeError("ID must be an integer")
-        self._id = value
+        if isinstance(value, int):
+            self._id = value
+        else:
+            raise TypeError("id must be of type int")
 
     @property
     def name(self):
@@ -33,13 +32,10 @@ class Magazine:
     @name.setter
     def name(self, value):
         if not isinstance(value, str):
-            raise TypeError("Name must be a string")
-        if len(value) < 2 or len(value) > 16:
+            raise TypeError("Name must be of type str")
+        if not (2 <= len(value) <= 16):
             raise ValueError("Name must be between 2 and 16 characters")
         self._name = value
-        self.cursor.execute("INSERT OR REPLACE INTO magazines (name, category) VALUES (?,?)", (value, self.category))
-        self.conn.commit()
-        self._id = self.cursor.lastrowid
 
     @property
     def category(self):
@@ -47,59 +43,83 @@ class Magazine:
 
     @category.setter
     def category(self, value):
-        if value is not None and not isinstance(value, str):
-            raise TypeError("Category must be a string or None")
-        if value is not None and len(value) == 0:
-            raise ValueError("Category cannot be empty")
+        if not isinstance(value, str):
+            raise TypeError("Category must be of type str")
+        if len(value) == 0:
+            raise ValueError("Category must be longer than 0 characters")
         self._category = value
-        self.cursor.execute("INSERT OR REPLACE INTO magazines (name, category) VALUES (?,?)", (self.name, value))
-        self.conn.commit()
-        self._id = self.cursor.lastrowid
 
-    def __repr__(self):
-        return f'<Magazine {self.name}>'
-    
+    def save(self):
+        sql = """
+            INSERT INTO magazines (name, category)
+            VALUES (?, ?)
+        """
+        CURSOR.execute(sql, (self.name, self.category))
+        CONN.commit()
+        self.id = CURSOR.lastrowid
+        type(self).all[self.id] = self
+
+    def update(self):
+        if hasattr(self, '_id'):
+            sql = """
+                UPDATE magazines
+                SET name = ?, category = ?
+                WHERE id = ?
+            """
+            CURSOR.execute(sql, (self.name, self.category, self.id))
+            CONN.commit()
+
+    @classmethod
+    def create(cls, name, category):
+        magazine = cls(name=name, category=category)
+        magazine.save()
+        return magazine
 
     def articles(self):
-        self.cursor.execute('''SELECT a.title 
-                              FROM magazines 
-                              JOIN articles a ON magazines.id = a.magazine_id 
-                              WHERE magazines.id =?''', (self.id,))
-        results = self.cursor.fetchall()
-        return [row[0] for row in results]
+        from models.article import Article  
+        sql = """
+            SELECT articles.id, articles.title, articles.content, articles.author_id, articles.magazine_id
+            FROM articles
+            INNER JOIN magazines ON articles.magazine_id = magazines.id
+            WHERE magazines.id = ?
+        """
+        CURSOR.execute(sql, (self.id,))
+        articles_data = CURSOR.fetchall()
+        return [Article(*data) for data in articles_data]
 
     def contributors(self):
-        self.cursor.execute('''SELECT a.name 
-                              FROM magazines 
-                              JOIN articles art ON magazines.id = art.magazine_id 
-                              JOIN authors a ON art.author_id = a.id 
-                              WHERE magazines.id =?''', (self.id,))
-        results = self.cursor.fetchall()
-        return [row[0] for row in results]
-    
+        from models.author import Author  
+        sql = """
+            SELECT authors.id, authors.name
+            FROM articles
+            INNER JOIN authors ON articles.author_id = authors.id
+            WHERE articles.magazine_id = ?
+            GROUP BY authors.id
+        """
+        CURSOR.execute(sql, (self.id,))
+        contributors_data = CURSOR.fetchall()
+        return [Author(*data) for data in contributors_data]
+
     def article_titles(self):
-        self.cursor.execute('''SELECT a.title 
-                              FROM magazines 
-                              JOIN articles a ON magazines.id = a.magazine_id 
-                              WHERE magazines.id =?''', (self.id,))
-        results = self.cursor.fetchall()
-        if results:
-            return [row[0] for row in results]
-        return None
+        sql = """
+            SELECT title
+            FROM articles
+            WHERE magazine_id = ?
+        """
+        CURSOR.execute(sql, (self.id,))
+        titles = CURSOR.fetchall()
+        return [title[0] for title in titles] if titles else None
 
     def contributing_authors(self):
-        self.cursor.execute('''SELECT a.id, a.name 
-                              FROM magazines 
-                              JOIN articles art ON magazines.id = art.magazine_id 
-                              JOIN authors a ON art.author_id = a.id 
-                              WHERE magazines.id =? 
-                              GROUP BY a.id, a.name 
-                              HAVING COUNT(art.id) > 2''', (self.id,))
-        results = self.cursor.fetchall()
-        if results:
-            authors = []
-            for row in results:
-                author = Author(id=row[0], name=row[1])
-                authors.append(author)
-            return authors
-        return None
+        from models.author import Author  
+        sql = """
+            SELECT authors.id, authors.name
+            FROM articles
+            INNER JOIN authors ON articles.author_id = authors.id
+            WHERE articles.magazine_id = ?
+            GROUP BY authors.id
+            HAVING COUNT(*) > 2
+        """
+        CURSOR.execute(sql, (self.id,))
+        contributors_data = CURSOR.fetchall()
+        return [Author(*data) for data in contributors_data] if contributors_data else None

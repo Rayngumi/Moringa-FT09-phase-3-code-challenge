@@ -1,25 +1,28 @@
-from models.__init__ import CURSOR, CONN
+from database.setup import get_db_connection
+CONN = get_db_connection()
+CURSOR = CONN.cursor()
 
 class Author:
-    def __init__(self, name):
-        self.conn = CONN
-        self.cursor = CURSOR
-        self._id = None
-        self._name = name
-        self._id = self.cursor.lastrowid
+    all = {}
 
-    def create_authors_table(self):
-        self.cursor.execute('''CREATE TABLE IF NOT EXISTS authors
-                         (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL)''')
-        self.conn.commit()
+    def __init__(self, id=None, name=None):
+        if id is not None:
+            self.id = id
+        self.name = name
 
-    def insert_author(self, name):
-        self.cursor.execute("INSERT INTO authors (name) VALUES (?)", (name,))
-        self.conn.commit()
+    def __repr__(self):
+        return f'<Author {self.name}>'
 
     @property
     def id(self):
         return self._id
+    
+    @id.setter
+    def id(self, value):
+        if isinstance(value, int):
+            self._id = value
+        else:
+            raise TypeError("id must be of type int")
 
     @property
     def name(self):
@@ -27,30 +30,53 @@ class Author:
 
     @name.setter
     def name(self, value):
-        if hasattr(self, '_name'):  
-            raise AttributeError("Cannot change author's name after instantiation")
-        setattr(self, '_name', value)
-        self.cursor.execute("UPDATE authors SET name = ? WHERE id = ?", (value, self._id))
-        self.conn.commit()
+        if hasattr(self, '_name') and self._name is not None:
+            raise AttributeError("Name cannot be changed after the person is instantiated")
+        if not isinstance(value, str):
+            raise TypeError("Name must be of type str")
+        if len(value) == 0:
+            raise ValueError("Name must be longer than 0 characters")
+        self._name = value
 
-    def __repr__(self):
-        return f'<Author {self.name}>'
-    
+    def save(self):
+        sql = """
+            INSERT INTO authors (name)
+            VALUES (?)
+        """
+        CURSOR.execute(sql, (self.name,))
+        CONN.commit()
+
+        self.id = CURSOR.lastrowid
+        type(self).all[self.id] = self
+
+    @classmethod
+    def create(cls, name):
+        author = cls(name=name)
+        author.save()
+        return author
 
     def articles(self):
-        self.cursor.execute('''SELECT a.title 
-                              FROM authors 
-                              JOIN articles a ON authors.id = a.author_id 
-                              WHERE authors.id =?''', (self.id,))
-        results = self.cursor.fetchall()
-        return [row[0] for row in results]
+        from models.article import Article 
+        sql = """
+            SELECT articles.id, articles.title, articles.content
+            FROM articles
+            INNER JOIN authors ON articles.author_id = authors.id
+            WHERE authors.id = ?
+        """
+        CURSOR.execute(sql, (self.id,))
+        articles_data = CURSOR.fetchall()
+        return [Article(*data) for data in articles_data]
 
     def magazines(self):
-        self.cursor.execute('''SELECT m.name 
-                              FROM authors 
-                              JOIN articles a ON authors.id = a.author_id 
-                              JOIN magazines m ON a.magazine_id = m.id 
-                              WHERE authors.id =?''', (self.id,))
-        results = self.cursor.fetchall()
-        return [row[0] for row in results]
-    
+        from models.magazine import Magazine 
+        sql = """
+            SELECT magazines.id, magazines.name, magazines.category
+            FROM articles
+            LEFT JOIN magazines ON articles.magazine_id = magazines.id
+            INNER JOIN authors ON articles.author_id = authors.id
+            WHERE authors.id = ?
+            GROUP BY magazines.id
+        """
+        CURSOR.execute(sql, (self.id,))
+        magazines_data = CURSOR.fetchall()
+        return [Magazine(*data) for data in magazines_data]

@@ -1,23 +1,23 @@
 from .connection import get_db_connection
 
 def create_tables():
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    CONN = get_db_connection()
+    CURSOR = CONN.cursor()
     
-    cursor.execute('''
+    CURSOR.execute('''
         CREATE TABLE IF NOT EXISTS authors (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL
         )
     ''')
-    cursor.execute('''
+    CURSOR.execute('''
         CREATE TABLE IF NOT EXISTS magazines (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             category TEXT NOT NULL
         )
     ''')
-    cursor.execute('''
+    CURSOR.execute('''
         CREATE TABLE IF NOT EXISTS articles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
@@ -29,5 +29,5 @@ def create_tables():
         )
     ''')
 
-    conn.commit()
-    conn.close()
+    CONN.commit()
+    CONN.close()
